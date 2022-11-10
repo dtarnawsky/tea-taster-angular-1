@@ -84,20 +84,20 @@ export class PinDialogComponent implements OnInit, OnDestroy {
         this.initVerifyMode();
       } else if (this.verifyPin === this.pin) {
         this.pinDialogService.pinAttempt(this.pin);
-        //this.modalController.dismiss(this.pin);
       } else {
         this.errorMessage = 'PINS do not match';
         this.initSetPasscodeMode();
       }
     } else {
-      console.log('Pin attempt', this.pin);
       this.pinDialogService.pinAttempt(this.pin);
-      //      this.modalController.dismiss(this.pin);
     }
   }
 
   cancel() {
     this.modalController.dismiss(undefined, 'cancel');
+
+    // This lets us clear the pin dialog singleton so it can be created again
+    this.pinDialogService.pinStatus(true);
   }
 
   private initSetPasscodeMode() {

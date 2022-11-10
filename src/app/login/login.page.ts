@@ -83,6 +83,7 @@ export class LoginPage implements OnInit {
 
   async unlock() {
     this.canUnlock = await this.sessionVault.canUnlock();
+    console.log('unlockSession action dispatched');
     if (this.canUnlock) {
       this.store.dispatch(unlockSession());
     } else {
@@ -93,5 +94,9 @@ export class LoginPage implements OnInit {
       });
       alert.present();
     }
+  }
+
+  async clear() {
+    await this.sessionVault.clear();
   }
 }

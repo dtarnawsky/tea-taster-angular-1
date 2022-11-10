@@ -10,10 +10,11 @@ import {
   Vault,
   VaultType,
   VaultError,
+  VaultErrorCodes,
 } from '@ionic-enterprise/identity-vault';
 import { ModalController, NavController } from '@ionic/angular';
 import { Store } from '@ngrx/store';
-import { Subscription } from 'rxjs';
+import { filter, tap } from 'rxjs';
 import { VaultFactoryService } from './vault-factory.service';
 
 export type UnlockMode = 'Device' | 'SessionPIN' | 'NeverLock' | 'ForceLogin';
@@ -26,9 +27,7 @@ export class SessionVaultService {
   private vault: BrowserVault | Vault;
   private session: Session;
   private sessionKey = 'session';
-  private pinAttemptSubscription: Subscription;
-  private pinStatusSubscription: Subscription;
-  private pinDialog: any;
+  private pinDialog: HTMLIonModalElement;
 
   constructor(
     private modalController: ModalController,
@@ -55,7 +54,11 @@ export class SessionVaultService {
     });
 
     this.vault.onUnlock(() => {
+      console.log('vault was unlocked so call it a success');
       this.pinDialogService.pinStatus(true);
+
+      // This ensures we go away from the login page on successful unlock of the vault
+      this.navController.navigateRoot(['/']);
     });
 
     this.vault.onPasscodeRequested(async (isPasscodeSetRequest: boolean, onComplete: OnCompleteFunction) =>
@@ -95,96 +98,83 @@ export class SessionVaultService {
   }
 
   async canUnlock(): Promise<boolean> {
-    if ((await this.vault.doesVaultExist()) && (await this.vault.isLocked())) {
+    if (!(await this.vault.isEmpty()) && (await this.vault.isLocked())) {
       return true;
     }
     return false;
   }
 
+  async clear(): Promise<void> {
+    await this.vault.clear();
+  }
+
   private async onPasscodeRequest(isPasscodeSetRequest: boolean, onComplete: OnCompleteFunction): Promise<void> {
+    const thread = Math.random();
+    console.log(`${thread}: onPasscodeRequest`);
     return new Promise(async (resolve, reject) => {
-      if (this.pinAttemptSubscription) {
-        this.pinAttemptSubscription.unsubscribe();
-      }
-
-      this.pinAttemptSubscription = this.pinDialogService.onPinAttempt.subscribe(async (pin: string) => {
+      const dialog = await this.getPinDialog(isPasscodeSetRequest);
+      console.log(`${thread}: onPinAttempt subscribed`);
+      const sub = this.pinDialogService.onPinAttempt.subscribe(async (pin: string) => {
         try {
-          console.log(`onComplete(${pin});`);
-          onComplete(pin);
-
-          if (isPasscodeSetRequest) {
-            // We want to close the dialog because we are actually setting
-            console.log('setting pin done');
-            this.pinDialogService.pinStatus(true);
-            resolve();
-            return;
-          }
-
+          console.log(`${thread}:setCustomPasscode(${pin})`);
+          await this.vault.setCustomPasscode(pin);
+        } finally {
           resolve();
-        } catch (error) {
-          // An error code 6 will occur on a failure
-          if (error?.code) {
-            this.pinDialogService.pinStatus(false);
-            // Failed PIN
-          }
-          console.error('onPasscodeRequest error', error);
-          reject();
-          return;
-        }
-        resolve();
-      });
-
-      if (this.pinStatusSubscription) {
-        this.pinStatusSubscription.unsubscribe();
-      }
-
-      this.pinStatusSubscription = this.pinDialogService.onPinStatus.subscribe((success) => {
-        if (success) {
-          this.pinDialog = undefined;
+          sub.unsubscribe();
+          console.log(`${thread}:resolved`);
         }
       });
-
-      if (this.pinDialog) {
-        console.warn('Pin dialog already exists return resolved promise');
-        return Promise.resolve(); // Only create one pin dialog
-      }
-
-      this.pinDialog = await this.modalController.create({
-        backdropDismiss: false,
-        component: PinDialogComponent,
-        componentProps: {
-          setPasscodeMode: isPasscodeSetRequest,
-        },
-      });
-      this.vault.onUnlock(async () => {
-        console.log('vault was unlocked so call it a success');
-        this.pinDialogService.pinStatus(true);
-        this.navController.navigateRoot(['/']);
-      });
-      this.vault.onError((err) => {
-        console.error('onPasscodeRequest', err);
-        if (err?.code === 7) {
-          // vault was cleared due to invalid attempts
-          // We need to force the pin dialog to close
-
-          this.pinDialogService.pinStatus(true);
-        } else {
-          this.pinDialogService.pinStatus(false);
-          console.log('rejected promise');
-          reject();
-          return;
-        }
-        console.log('resolved promise');
-        resolve();
-      });
-      console.log('onPasscodeRequest', isPasscodeSetRequest);
-
-      await this.pinDialog.present();
     });
+  }
+
+  private async getPinDialog(isPasscodeSetRequest: boolean): Promise<HTMLIonModalElement> {
+    if (this.pinDialog) {
+      return this.pinDialog;
+    }
+    this.pinDialog = await this.modalController.create({
+      backdropDismiss: false,
+      component: PinDialogComponent,
+      componentProps: {
+        setPasscodeMode: isPasscodeSetRequest,
+      },
+    });
+
+    // When we get success we need to clear the singleton for our pinDialog
+    const sub = this.pinDialogService.onPinStatus
+      .pipe(
+        filter((success) => success),
+        tap(() => {
+          console.log('Pin Dialog was closed');
+          this.pinDialog = undefined;
+          sub.unsubscribe();
+        })
+      )
+      .subscribe();
+    await this.pinDialog.present();
+    return this.pinDialog;
   }
 
   private async onError(err: VaultError): Promise<void> {
     console.log('SessionVaultService onError', err);
+    if (err?.code === VaultErrorCodes.TooManyFailedAttempts) {
+      // vault was cleared due to invalid attempts
+      // We need to force the pin dialog to close
+      this.pinDialogService.pinStatus(true);
+    }
+    if (err?.code === VaultErrorCodes.AuthFailed) {
+      // This lets the pin dialog know we have a failure
+      this.pinDialogService.pinStatus(false);
+
+      // This reattempts an unlock
+      this.vault.unlock();
+    }
+
+    // We get reports that the passcode is not setup yet but it actually is so we have to ignore these
+    if (err?.code === VaultErrorCodes.MissingPasscode) {
+      console.warn(
+        'Identity Vault reported that the passcode is not setup but it is so this is a bug and we should ignore this error code!'
+      );
+    }
   }
 
   private setUnlockMode(unlockMode: UnlockMode): Promise<void> {

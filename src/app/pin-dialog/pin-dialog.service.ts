@@ -11,7 +11,8 @@ export class PinDialogService {
     this.onPinAttempt.emit(pin);
   }
 
-  pinStatus(success: boolean): void {
-    this.onPinStatus.emit(success);
+  // canClose means the pin dialog should close because the user entered the right pin or canceled or failed too many times
+  pinStatus(canClose: boolean): void {
+    this.onPinStatus.emit(canClose);
   }
 }
