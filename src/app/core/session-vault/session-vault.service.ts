@@ -18,7 +18,6 @@ import { filter, tap } from 'rxjs';
 import { VaultFactoryService } from './vault-factory.service';
 
 export type UnlockMode = 'Device' | 'SessionPIN' | 'NeverLock' | 'ForceLogin';
-type OnCompleteFunction = (code: string) => void;
 
 @Injectable({
   providedIn: 'root',
@@ -54,15 +53,15 @@ export class SessionVaultService {
     });
 
     this.vault.onUnlock(() => {
-      console.log('vault was unlocked so call it a success');
+      console.log('vault was unlocked so you can close the pin dialog');
       this.pinDialogService.pinStatus(true);
 
       // This ensures we go away from the login page on successful unlock of the vault
       this.navController.navigateRoot(['/']);
     });
 
-    this.vault.onPasscodeRequested(async (isPasscodeSetRequest: boolean, onComplete: OnCompleteFunction) =>
-      this.onPasscodeRequest(isPasscodeSetRequest, onComplete)
+    this.vault.onPasscodeRequested(async (isPasscodeSetRequest: boolean) =>
+      this.onPasscodeRequest(isPasscodeSetRequest)
     );
 
     this.vault.onError((err) => {
@@ -108,7 +107,7 @@ export class SessionVaultService {
     await this.vault.clear();
   }
 
-  private async onPasscodeRequest(isPasscodeSetRequest: boolean, onComplete: OnCompleteFunction): Promise<void> {
+  private async onPasscodeRequest(isPasscodeSetRequest: boolean): Promise<void> {
     const thread = Math.random();
     console.log(`${thread}: onPasscodeRequest`);
     return new Promise(async (resolve, reject) => {
@@ -142,7 +141,7 @@ export class SessionVaultService {
     // When we get success we need to clear the singleton for our pinDialog
     const sub = this.pinDialogService.onPinStatus
       .pipe(
-        filter((success) => success),
+        filter((canClose) => canClose),
         tap(() => {
           console.log('Pin Dialog was closed');
           this.pinDialog = undefined;

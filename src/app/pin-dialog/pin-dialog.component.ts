@@ -48,9 +48,9 @@ export class PinDialogComponent implements OnInit, OnDestroy {
       this.initUnlockMode();
     }
 
-    this.subscription = this.pinDialogService.onPinStatus.subscribe((success) => {
-      console.log('PinDialogComponent onPinStatus', success);
-      if (success) {
+    this.subscription = this.pinDialogService.onPinStatus.subscribe((canClose) => {
+      console.log('PinDialogComponent onPinStatus', canClose);
+      if (canClose) {
         this.modalController.dismiss();
       } else {
         this.errorMessage = 'Invalid Passcode';
